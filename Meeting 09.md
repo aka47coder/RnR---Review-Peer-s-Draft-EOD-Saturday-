@@ -1,419 +1,302 @@
-# The Merge Implementers' Call #9: Engine API design space Call 2
+# 1559 Implementers' Meeting #9 Notes
+### Meeting Date/Time: Thursday  14 January 2021 at 16:00 UTC
+### Meeting Duration: 1.5 hours
+### [GitHub Agenda Page](https://github.com/ethereum/pm/issues/234)
+### [Audio/Video of the meeting](https://www.youtube.com/watch?v=KllIW2hqw2I)
+### Moderator: Tim Beiko
+### Notes: Avishek Kumar
 
-### Meeting date/time: Thursday, Sept 9 at 13:00 UTC
-### Duration: 60 Minutes
-### [Github agenda](https://github.com/ethereum/pm/issues/385)
-### Moderator: Mikhail Kalinin
-### Notes: Darkfire-rain
+----
+## Action Item and Decisions
 
-## Changes in the Minimal set of methods
+Item | Action / Decision
+-|-
+**9.1** | Schedule another call  in a week from now to do a performance test with  Geth Nethermind and Basu to fix the bugs.
+**9.2** |Tim will engage in active dialogue with miners. 
+**9.3** | Be clear with that decision and set expectations with the community. List objectives, hypothesis, changes brought and get feedback from the miners.
+**9.4**|  Micah  will be creating a PR 
+--------------------
+**Tim Beiko**: Okay we are recording, so hey everybody  this is EIP 1559 call # 9 Which feels like a lot. So I shared the agenda in the chat. We have a couple of things to go over today, a few updates from different folks and then going over kind of the large state testnet, testing and yeah that should be it. Ansgar I see you are on the call and I think you had to head out early so do you want to start with your updates
+# Status updates from researchers and implementers
+**Ansgar Dietrichs**: I do not think I fit out early. I think that must have been someone else so. But I am sure to go first but it sounds like maybe someone else has to leave early or something.
 
-**Mikhail**:  Okay So welcome to the engine api discussion goal number two and actually discussion session around the engine api number three because we had an extra session during the previou acd call. The format of the call is the stays the same. if you want to ask question or just put  comment feel free to interrupt me at any point. if we are falling into a deep discussion around some particular thing,  we will likely  break it and follow up on that in the discord in order to not  destruct the general line of call.l And also we have an agenda for today as we'll start from some small change to the minimal set of methods that has been done since the previous discussion session and then go to the transition process. I'm no too optimistic that we will reach the end of the document today but I think we should cover most important parts by the end of this call.  Okay so let's get started with the change to the **minimal set of methods**. The first one is discussed in discord, I guess With micah and jim and I think it makes sense  if engine prepare payload, if  building a payload in advance is not supported by a client it should be implemented as a no op so it will just do nothing but the consensus client  will not have to adjust its  usual load building flow depending on the client on the execution client implementation so it makes a lot of sense. And i don't think anything to comment here.
+**Tim Beiko**: Does anyone else do.
 
- next is the  get payload limitation will now depend on prepare on this support of repetitive payload if it's fully supported then get payload should must return immediately with what has been built whatever it is even if it's just the empty payload, so the consensus client will have a guarantee that it responds immediately but if the prepare payload is not is a no op is not implemented then get payload will work as follows it just will go to the mempool, select transactions from it build the payload and return back so it will cause some delay. Also prepare payload and get payload might be overridden by clients that are optimized for mev and in this case the prepared product will be no op and the get payload will if there is the block builders in place it will just return the fully full payload to the consensus client so it will also it should also work like um it should also be an immediate return and yeah this is just an opportunity for movie clients how it could be implemented.
+**JosephC**:  Just go ahead.I may have mentioned it to Tim.
 
- **Micah**:  So we can discuss this further in discord i thought we talked about and agreed to and sounds like we misunderstood each other that get payload would always return immediately and it's up to the execution engine to you know figure out how to do that if they're running an mev client of some kind that might just be you know grab latest block and return it because presumably if they've already pre-validated those or if they're not running mav then maybe they should turn empty block or they return a block they built previously but i thought that get payload is always supposed to return right away like as fast as possible. and if you want to do more processing you should do it after you get the prepare.
+**Ansgar Dietrichs**: okay I think that might have been a scheduling conflict but I kind of moved  the other thing. But things are okay. So sorry and no but Ii can go ahead. So  basically I linked like a little document. Again that was kind of  the follow-up of the previous one. I had maybe two months ago, exactly  that's the new one. I think that yesterday I am not sure it was a little bit late if people had the chance to to have a look. So I have been thinking a little bit more about  like specifically the sorting aspect or like the sorting aspect in in clients for 1559 transactions and in basically as it said in the TLDR in the beginning, so basically when I first started thinking about it  just because I didn't really have a lot of background in 5059. It looked very much just like  now you have two parameters right, the maximum total VCAP and the maximum minor Price and and basically now you have to sort like in this two-dimensional space and with all the complexities that came from that. And kind of re-evaluation every block and everything but the more I kind of  looked into it. To me it seems more like that it's really mostly about understanding kind of the  very specific structure of how  1559 will affect to transactions and kind of optimizing the client around that so, what I mean by that is basically if we look at  like the mempool under 1559 in  like a normal situation where it is not one of these  extreme demand spikes that  might be the rare  kind of um exception to these normal situation. But like in any normal situation you usually only have a handful of includable transactions right? Includable transactions mean that the fee cap of the transaction is above the current base fee. The reason why you only have a few is basically mostly by definition right because 1559 in the steady state blocks are on average just the target size. So,they might be a little bit over a little bit under but on average that they only target size and miners always include as many transactions as they can upto twice the size. So the fact that this blocks in the steady state are only like
+ one time the target size. Basically already indicates that on average a miner that creates a new block only has enough transactions to fill one time. This  target size basically and so in the mempool base of course that means that usually  the vast majority of transactions are
+actually not includable at the current price and which is probably  a very trivial observation. But it took me a while to fully get there and understand the implications because it actually has a couple of implications. So I think the more obvious part is for mining so of course for mining you only care about the currently includable transactions. You do not care about what might be in a couple blocks. You are mining account blocks and you need the transactions that are includable at the current block and so basically what that means is that the mempool ideally should have a way of  giving you currently the includable transactions.And then I initially was concerned with really liking  designing. An optimal algorithm for managing  a partially sorted structure that always gives you the highest paying transactions. I think I outlined a design for that in the last document and then this. I am not sure if  he or she or if they are on this call  me now.  The user kind of took this  approach and kind of  implemented it. Like an example sorting mechanism there which was awesome to see. Yeah. exactly this one but basically I think the main insight though on that specific topic is that this is probably an optimization that  maybe not necessary at all or at least not necessarily in the beginning because what miners already do today. At least like well on the guest I am most familiar with the githminer but   what the githminer already does is they get like a complete list of all pending transactions which I can't like before 1559  that can be thousands of transactions and they sort all. They basically sort them once per second or I think the default. This one's put three seconds or something and then they discard that and  completely resort every three seconds. So basically they are doing much more already than they will have to do under 1559. So under 1559 the kind of  effort for the miner only goes down and so we can always still kind of optimize but it seems like this is really like a very simple  thing  and then the main change that I think is actually most worth talking about for miner then is is not even the sorting itself but actually how do you handle the stream of incoming transactions because right now what the miners usually do is they basically create a block and then they start mining on an empty block. Just to be able to start hashing immediately but then as soon as they have created a block they start my switch over to that and mine on top of that block and then again with this interval like once every second. I think the default is three seconds but  you can  ramp it up to once every  second.
+They basically create a completely new block right because it might  have been new transactions coming in since then. So they create a completely new block , once that's done they again switch on to mine on top of that and of course you can do then a ive thing and just do the exact same thing under 1559 as well. But if you look at the specifics of 1559. You usually  as soon as a blog comes in that from outside that you want to mine on top of or like that you want to mine the next one for  the chain and that will probably already use up most of your includable transactions. so you'll start out as a miner with like only maybe  zero maybe like a very small amount of transactions to include in the block immediately and then over time while you are mining and you have not yet found a block. New transactions will come streaming in and so then on average I do not know. Let's say every 12 seconds or whatever the average for non-empty blocks. The mining effort will be on average it will take you 12 seconds to collect enough transactions for one normally full block and then after maybe
+24 again if just very simply spoken but after 24 seconds you'll finally hit the cap and  your block is full actually for twice the size and so basically what you ideally want to do is you will want to just like immediately as soon as a new transaction comes in just append it to the block. You are already mining on top of and then maybe still once every second every three seconds or something you can do like a reorg where you resort them in some other like by some other metric which  doesn't really matter for the miner but maybe for the network as a
+whole it's nice if they mostly kind of prioritize higher paying transactions even within the block still or something but basically there is a pen, there is immediate append action that's not done currently in geth and that is something that I would propose to that should probably already be done as part of like  the initial 1559 implementation. It is even that part of optim optimization. There is optional and then again for the broader sorting side for mining. It's really simple. I would say maybe before I go to the other big topic the eviction.  Does it make sense? So far is that done? I may have something backwards there also.
 
- **Mikhail**: okay, okay I guess so it just builds a block on the prepare payload and doesn't update it right? this is like the potential implementation the potential behavior. if the client doesn't support this constant  updating of the block that is being built.
+**Micah**: I think that will make sense. One thing I would say is I think first in first out is actually slightly healthier for the network
+than  price based. If there is no contention and so my vote would be until the block is actually full don't bother resorting the transactions. If we have  no need to do it. It doesn't help the network really. I do not think to sort by guest price because I just think it encourages more gas price auction stuff whereas if we are doing FIFO most of the time gas price elections become much harder and much less profitable which is kind of good because cash price auctions are not the healthiest thing. They are a thing that we deal with because we have to but it would  be nice if they just kind of went away and so my vote would be if you do not have a full block just do first. First step like you
+said just depend only until your block is full. Then once the block is full then decide  what am i going to kick out of the block and then I have to rebuild it and then at that point sporting might be the easiest way in which case sure go ahead and sort but my hope is that if most blocks are not 2x full then we can do basically FIFO miners still gets all their payday. We do not encourage this behavior of people hammering the network with gas price wars basically.
 
-**Micah**: so even in that case like I guess my assumption is from from like an api
-design standpoint it's very beneficial if the there are strong guarantees that the consensus client can rely on and timeliness of response to get payload is important because if you have if the client can rely on a very fast response from get payload then they can wait to the last minute to send it which is desirable because you want to wait as long as the kind of client feels is reasonable because you're more likely to get better transactions more expensive block et cetera whereas the consensus client has to assume that the yet payload response may be slow it means they have to send the get payload request sooner which means you have less time to build a better block and so I thought. again we can talk about this more in discord, I think you and i must have misunderstood each other as Well.
+**Ansgar Dietrichs**: Yeah and of course I mean that this is a little bit tricky because for miners these guest wars might actually still be preferred. It is beneficial because that drives up the mine upright but I think at least right .We still need the functionality of the resorting as you were saying to use as soon as we reach the actual 22x cap.So I think it probably would not hurt to at least expose it to minor so they
+can optionally switch and do that immediately or something. But yeah I think at least the simplest approach would really just be first in first out until you reach the 2x cup but Ii would say this  can probably be left to the  individual client devs to just make the decision on.
 
+**Micah**:  Yeah I think just to build slightly on that I think most importantly is if we have  geth do person first out until two expo and
+other clients do slightly better sorting. It would encourage more client diversity in minors so basically it is kind of like almost not quite as good as the other miner. Also make it so geth does not do as much work  to encourage people to switch to another mind open ethereum so never mind open ethereum go and make a better sorting algorithm gives miners. You know slightly better money then it will encourage people to switch to other mines  of gas which I think we generally want more client diversity and minors I believe.
 
-**Mikhail**: Yeah,  I get it yeah and yeah I tend to agree that.
+**Ansgar Dietrichs**: Yeah I mean I can see the point there. I just want to basically give the kind of counter argument that I gave in the discord as well. I am personally open on this question but I would just say I am given that 1559 is already somewhat disruptive. I think the disruptive kind of over emphasizes it but it is at least a significant change for  minors already. So I think it would probably be best to kind of keep the changes or yeah that the changes to the minimum necessary to support the switch to 1559. So this is why I might  think that  may be  changing. This might be something we should rather push than for it on its own instead of as like part of the of the overall 1559
+implementation. Yeah I do not really personally have a  strong opinion there. Okay but yeah So I think that this is like a general. This kind of summarizes the minor side of that quite well. I also talked with Gary from the guest team yesterday  who does likely get  implementation of the minor as well. Just to double check my assumptions and it seems like this is indeed kind of how the concentration is and they are
+actually interested in  looking into how they can adapt to 1559 so that would probably continue as a conversation. 
+
+Okay then the other part again probably that also is familiar with people by now. That is of course the  eviction side that is where you also need sorting to  know on the bottom end of transactions  which ones to get rid of. If you running out of space  and there the id again if you
+basically look I think about this situation where in the normal circumstances most transactions will be like in this non-includable zone and then  you look at those in a little bit more  more closely and so one thing of course is that I think it is rather likely that clients will do something similar as they do today, with this  minimum gas guest price that they enforce right and they just drop transactions that are below .So I can definitely see that happening also with the mine upright where now another 1559. If your minor bribe is below some standard. I don't know one gray or something and the transaction gets even dropped immediately by the mempool. I don't know, maybe not maybe  but I think that is at least something definitely realistic and so that would basically put a lower bound on the minor bribe that any transaction in your mempool will end up paying. If it ever gets included but then the interesting thing is there's also  at least some soft upper bound for what  an effective bribe a transaction will probably end up paying. If it's currently not includable, if the transaction comes in and  the current base fee is 100. Let us say  the transaction comes in it has  a  fee cap of 200 right, so it's immediately includable then it could potentially be or pay all the difference there all the 100 extra in as a minor bribe that is possible. But on the low side if it's actually in the mempool that is waiting to be includable again or at all and this will that transaction even if it has like  really high maximum minor bribe it will almost never actually end up paying this whole big minor bribe because it will be included as soon as the base fee drops low enough that it becomes includable. This is  a topic we have to talk a little bit about  how  often do we expect  significant drops, all of a sudden or something maybe with empty blocks? Occasionally or generally a transaction will be  most of the time become incredible just barely right where the base features drop just low enough that it became  includable and maybe includable with this minimum minor bribe kind of the distance but that means that most transactions even if they potentially are willing to pay 20 10 20 30 gray of  minor bribe. If they are currently not includable they will probably be in the future. If they ever become includable will probably end up only paying a small minor bribe just because they will only barely become includable. Then  again the question is how often do we expect significant shifts in the base fee and so this is of course the details like how small this kind of this band of expected minor bribes can be. This is  still a
+a little bit unclear or like there are different assumptions to be made there but the general insight there basically is transactions currently in the country are not includable side of things. We probably all end up paying  only a small minor bribe and so then kind of getting back to  what I was initially in this first document and I think we also talked about on the call and maybe like two calls ago or something what I was initially thinking  about was kind of really optimizing for this expected minor value of transaction so that took into account. The minor bribe
+and the  chance of eventual inclusion basically but now with kind of the minor bribe kind of looking more that  it's almost uniform again within this small band and it turns out that this kind of mostly reverts really back to the simplest. This is the simple approach there that we started out with. So it is basically like just sorting eviction decisions by fee cap.They're just the total fee cap per gas. This really gets us close very close at least probably to  this expected value to the miner. Then of course  there is still a case to be made to  really optimize to go beyond that. It looks just going with a simple implementation.Here again is also just really hits this good enough for main at launch threshold so basically  just have notes do the simple thing and then once we actually have good data of how does the base fee change,
+how often do you actually get these significant drops so basically how much of a difference is there between transactions that are waiting to be included that have like maybe a big smaller or larger maximum minor bribe. Can we maybe do some more optimized sorting but it really seems  just the very basic thing. Just sort by fee cap or gas they can use all the existing implementations. so it is like a very small change it really looks like this might or this will be good enough for mainland launch basically. So  that at least I feel like this is basically the one question where I also feel like and I think Barnaby  you were talking about that in discord as well where we  might be  a really good target for some additional simulation  work. Just to see  under some assumptions and again of course these simulations are usually like
+whatever assumptions you put in you get out but still just yeah and a few different scenarios like how much of a difference is there
+that could potentially kind of be optimized for with  an optimal Algorithm  but yeah I think this is kind of my view on the eviction side.
+
+**Tim**: Is there a way to like this spam proof in a way so is there a way where you can constantly raise your fee cap because  if you say you had a fixed minor bribe. You know the base fee changes or whatever is there a way you can spam the transaction pool by just constantly raising your fee cap by one way.
+
+**Ansgar Dietrichs**: Yeah so basically I did not put it on this document because I do not think it is like one of these kind of complex issues where there's a lot of open questions but I think for transaction replacement right with the same account same ones I think  this kind of simple heuristic. I think  we also already kind of talked about candidates there like the simple heuristic of. You have  at least the same minor bribe and you have  at least some  a ten percent increase  of maximum fee and if you just have that then you have a very similar situation as you have today but it's basically the same.
+
+**Tim Beiko**: Okay got it.
+
+**JosephC**: He wrote that in his previous doc as well.
+
+**Tim Beiko**: okay  yeah I just wanted to make  sure that this kind of thing still holds  even though  this sorting is quite simple.
+
+**Ansgar Dietrichs**:  yeah but basically the idea that there's really just make replacement expensive or well so that you could just can't do
+a lot of replacement before you actually hit the includable zone. So it's basically the idea is he network is mostly just optimized like just looking at fee cap per gas for all of these decisions for eviction for replacement for all of that and then the minor bribe that's actually mainly just used then at the point of inclusion at the miner themselves for these decisions but the network mainly just looks at the the fee cap.
+
+**Abdelhamid Bakhta**: I  have a question. Yeah I forgot to ask this morning when we talked but basically you are assuming there is  only a 1559 transaction in the pool but what if there is a mix of legacy transactions and 1559 do you what is the ordering basically you consider the fee cap to be the gas price for a legacy transaction.
+
+ **Ansgar Dietrichs**:  I would yeah but basically just  like converting legacy transactions to this kind of 1559 format where the maximum minor bribe equals the maximum total fee  and that shouldn't be because again either they just get included immediately in which case again they only have the issue that they might overpay. Which is just like the kind of the trade-off there or they end up in this not immediately includable zone where then at the end of the day. They set this high max mine up right doesn't really matter because
+most of the time they will end up only paying a small one . Anyway so then they kind of  more similar to the to the native 1559 transactions
+then  basically initially. 
+
+**Abdelhamid Bakhta**: Okay that make sense.
+
+**Ansgar Dietrichs**: But yeah what that means basically is I would strongly argue that memphis should immediately just implement full conversion of these legacy transactions and not have like two separate mempools I don't think there's a case to be made yeah like really keeping two separate mentors. one question that I was just having was do we have I am not that familiar with where all the participants.I
+guess so the question was just do we have someone from like some of the other clients. I have already talked to Abdel about the situation with Besu but I would also be interested in  how about other clients. It is basically the implementation they are also kind of compatible with what I outlined here. The other aspects that I did not think of that might not need adoption. There adaptation I mean but I can also
+like that was like the one thing that I still wanted to do was just reach out there and see if there's anything i wouldn't expect. It seems or rather straightforward there but  just to double check.
+
+**Tomasz**: At the moment the implementation is just taking  very similar behavior as before, sorting the transactions by the value for the miner and so I am listening here but  it is the final plan for the sorting. You think that this should be implemented in the clients or from the very beginning when we were talking about sorting in the transaction poll. I am thinking this is not part of the consensus which means that it can always be implemented differently and according to the miners requirements so long as this is most beneficial for miners. I think it makes sense and it'll be stable but if it's not then people start replacing it with whatever is most beneficial for miners. Right?
+
+**Ansgar Dietrichs**: yeah i mean um so i definitely agree that it's not consensus relevant and so i think it's really just important that there's  one good enough implementation that everyone can  basically fall back on. If they do not  want to do something  of their own. I was just curious then. If you when you're saying optimizing for what's  most the value for the miner. what so like to say any transaction that you're looking at that's currently not includable. How do you calculate the value for the miner there because I am not.
+
+**Tomasz**: When you say not  includable you mean by the fact that the base fee is above the block level right?
+
+**Ansgar Dietrichs**:  exactly yeah
+
+**Tomasz**: so it is just a question whether you want to keep some of them in the transaction pool while they are waiting for the return on you just keep evicting them. So I know that we want to keep the transaction pool minimal and keep evicting the transactions right. So I think for us it may be even configurable by the miner. So  do you want to be a victim or you want to keep them. Then the question whether you want to  propagate them when normally they would be evictable probably not if other clients would evict them anyway then you just don't  propagate them and keep them for the miners. So when the base fee goes down they can include them. This makes sense from our perspective but I want to read this much more in detail. What  you wrote and  like now if with the approach that we have probably will start
+suggesting the users to  pick the implementation of the transaction pool one of a few and a behavior so parameterize it.
+
+**Micah**: one thing we have to keep in mind is that while not technically part of consensus a the various clients do need to have an
+agreement on what criteria will cause you to drop up here and so we do need to make sure that we do agree on at least that part.So if
+ You have got some threshold where you're like hey you're spamming me now. I am to drop you,  we need to make sure we're all kind of
+all the clients are in agreement that what the threshold is. We make sure we do not  have one client that says no this transaction's fine or another client's  no that is spam and I am going to disconnect from you. That is what we do. We don't want to take a consensus but something we do need to agree on before lunch.
+
+**Tim Beiko**:  yeah and I  think that is  almost like more of you know kind of an all core devs conversations in a way to me.  It  is a threshold we need to agree on but it is  not gonna block anything.I  do not think we will ship or not ship 1559 based on the value of that trash holds.
  
-**Gary**: Can we specify a time constraint that we get the response by?
+**Micah**:I was going to say  something to keep in mind  is that we always talk about how if there is a better mining strategy for miners will switch to it. We actually have many years of evidence that suggests that is not actually true. Miners seem to be reluctant for unknown reasons to actually write code that changes their clients significantly. We see that because it has been massive for years now there is a massive opportunity for miners to take extractable value from d5 and no one has until the mbb people  basically came in and did it for them . So if we have a transaction sorting algorithm that is good enough and well technically. A minor could do something else. Our evidence suggests most of them will not and going back to the first in first out sorting, if most miners are doing first in first out then it becomes very expensive to do gas price auctions because most miners will just ignore your gas price or and we will just include the person first out. You will waste money so even if some miners defect and write their own clients that are more optimal. It would not likely affect the network and people would not leverage that because you can't leverage it unless all the miners do it. So just keep that in mind that while theoretically game, I 100% agree miners should be optimizing these things, our evidence suggests they don't for whatever reason.
 
-**Micah**:   i think the trickiness with the time constraint is that it's highly dependent
-on your like internet your architecture if you have your consensus and execution client both running the same machine then you know the round trip time is less than a millisecond and so you might have you might be able to wait until kind of even more the last minute versus if
-you're running distributed maybe across multiple data centers or across multiple  machines across the world or whatever then you need to send it much sooner. so I worry about kind of doing a protocol level time constraint there um just because I feel like it's highly dependent on your architecture.
+**Tomasz**: But I feel like we want to treat, monitor miners into using something potentially suboptimal and It is okay if you do          
+     that as a particular client implementer and it is your decision but to try to spec it which is against game theory and say okay. So we will 
+     just do that because no one will implement their own solution. I would leave it to client implementers saying this is some suggestion for  
+     EIP 1559. It is not part of consensus you can do that whatever way you want. If some other clients will drop you because you propagating 
+     transactions that are not nice for them and obviously, you will adjust because you don't want to be disconnected from the network and 
+     there will be some clients that will have a bit of more to say depending on their  network participation rate right so the market share 
 
- **Danny**: the constraint is don't use this message to start doing really hard work and instead to final you know finalize the bundling of a block and pass it along. 
 
-** Unknown speaker**: Isn’t that what the prepare payload is? 
+**Abdelhamid Bakhta**: well that is the plan, all of this is not part of the specification. It is a set of guidelines, it is a soft agreement but yeah you are not obliged to do so.
 
-**Danny**: This is when prepare payload isn’t called. so if a get payload is called essentially like should it at that point try to do hard work or should it just pass what it has which may be not something very good and I think the implication here is past what it has, it might not be very good or maybe it uses some sort of pending block structure and it should just pull from that but it shouldn't be a an initiation to like do work that's going to take a second or three or eight.
+**Ansgar Dietrichs **:  Just  to briefly clarify this kind of does not propose any kind of rules that are like purposefully suboptimal for the miners. This is all kind of trying to optimize to just  sometimes maybe prioritize simplicity over optimization but it is at no point again this was just like an additional proposal by  michael. We were talking about how we could maybe get some decisions specifically even more simple or something but in general this kind of  no place, kind of purposefully chooses the not  optimal.
 
-**Mikhail**:  i think that prepare payload must be called anyway anyway so it should be like a requirement so that get payload follows the corresponding prepare payload call.
+ **Tomasz**: Yes I was referring to the Micah suggestions  and some of the Dietrichs was also suggesting before but the way  trying to decide for the users how  they should treat the transactions in a transaction poster. I prefer the solution which is based on suggestions where we discuss it but not try to enforce it among the clients. Just say okay so we discussed  it. This is how it behaves as that works. This is not damaging.1559 but we do not want to spend too much time on it because it delays us in the actual implementation that is how I see it and  it is super useful for analysis and something that I read with pleasure. I am just here saying that we won't be necessarily saying that it is exact in the way we implement it. We want to keep that freedom of saying okay transaction policy outside of consensus logic, so we want to be able to do something that will decide will be most beneficial for users.
 
+**Micah**:  Yeah and to be clear. I  definitely  do not  think that we should force anyone to do this. The reason I bring it up is just because one of those things where  if we all happen to own our own right clients that do first in first out. I believe that will be healthy for users of the network even though it may come at a cost a minor cost to minors and so it is one of those things where we can maybe opportunistically get a free win for users and to me that is something we should maybe think about and try for. But I definitely do not think that any client
+should be forced to follow the strategy. It is non-consensus just a hey you know if we do this thing maybe we get a free easy win and if we don't then it reverts back to you know what we're gonna do anyways. So it is not a big loss.
 
-**Danny*:  sure I meant if prepare payload was in no option
+**Ansgar Dietrichs**: Although just to mention I  personally I am  not sure  fully about that because I do think that this would then in turn just incentivize, kind of side channel communication with miners directly to basically pay for positioning in the blocks directly which ends up being the same thing just with more friction so  but yeah that is a good argument.
 
-**Mikhail**:  oh yes yes okay I I thought you know 
+**Tim Beiko**: I guess if we take a step back, I think the reason we wanted  to do this work. There were concerns that we could not find like a suitable way to sort the transaction pool that would be kind of spam proof  under 1559. I feel like you know we're definitely at that spot now where you know we have at least a solution that would not make the status. You know significantly worse or cause  like a security issue.I am pretty satisfied with what we have right now. If different clients want to do different things or if we all align obviously has all like it's you know own set of trade-offs but I feel like with regards to the risk that having 1559 introduces in the transaction pool for dos vectors and things we're in a pretty good spot with this right and then if different clients again want to tweak it. I think that is a separate conversation. I guess maybe my question is  does anyone feel like  there's something more that we need to help justify that like 1559 is  sound and safe. That is not being presented here.
 
- **Alexey**:  and I have a question so what is the what is the consensus Engine suppose to do between the calls of to prepare payload and get payload?
+**Ansgar Dietrichs**: I mean sounded safe under this aspect I am generally convinced that it sounded safe but of course this this only covers the kind of mempool sorting side of things
 
- **Mikhail**:  it's supposed to keep listening to the beacon chain network and probably update the head in between and call prepare payload once again with the new head.
+**Tim Beiko**: Yes and then you know I think we mentioned earlier like we will need to discuss also like how the clients want to do peer management and stuff like that. I think to me this was like the biggest potential risk with 1559 if  we efficiently sorted the mempool.Can we  manage your transaction pulled without it becoming crazy and yeah I am much more confident in that now. The rest kind of feels like an implementation detail at this point right where  we can have long drawn-out conversations about that. It is not going to be a blocker
+for the EIP.
 
+**Ansgar Dietrichs**: Yeah that makes a lot of sense to me.
 
-**Alexey**:  so it may potentially issue multiple prepared payloads and then only one get payload is that's what you're saying?
+**JosephC**:  especially when the block is not full sorting still has a cost. So you know by appending only the miner might already find a block in that time  
 
+**Tim Beiko**:  and we see that on the mainnet already. Right like with empty blocks that get mine. So I am fine with like you know we don't need to solve all of the inefficiencies of mainnet to deploy 1559. we just ideally have to not make any one aspect significantly worse. 
 
-**Mikhail**:  right if another prepare payload the new priority arrives yeah so it will the process of
-building a block will very start it.
+**Micah**: Yeah I am with you. I was a little bit worried about the sorting algorithm not worried like a blocker. Just worried it was going to be hard but that this research has convinced me that it's easy.
 
- **Alexey** so what i'm getting at is that the the reason why this things have been split into two pieces, right into prepare parallel and get payload is that because you might have a multiple of the first and only one of the second, right?
+**Tim Beiko**: Yeah same and yeah again like I think you know thanks a lot Ansgar  for this. This  has really benefited from having somebody who's like actually spent time thinking through it deeply rather than as a side thing on top of everything else.  So yeah this has been really helpful.
 
- **Mikhail** the initial reason is that the proposer wants to start, he wants to initiate the building of the payload in in some advance. it knows that like during the next slot or the next couple of slots, like the next few slots it will have to propose a block and at some point in advance it starts some point prior  the slot that it's supposed to propose.
+**Ansgar Dietrichs**: Thanks  but just briefly by the way to mention because I have it under further questions. One thing that I realized like
+dealing with this is just I think at some point but I think  that it's not necessary before we launch on mainnet but I think at some point
+it's probably also like a good idea to to to get back to for one to just the aspects of what are the kind of the  things that might also at some point change with ETH2 right because we will probably just want to move this 1559 over and also use on these two.But that is of course a little bit further in the future but maybe I don't know that it might just be that 1559 only ships half a year before the merge or something. So
+this might become relevant quite soon. Then there is one specific topic so how can we maybe long term that doesn't have to be in the first
+release but long term. Keep the base fee a little bit more smooth and stable even under like the kind of distribution of block times right. Right now what will happen under 1559 is sometimes you have very quick blocks and that means that they are either like the second one is either empty or almost empty and then the base three will drop quite a bit or sometimes you have like very long time periods and then that looks like congestion, so basically then the the block will be twice will be double doubly full and so that there could be arguments
+to maybe at some point time adjustments as well or something that also takes into account the time. Since the last block or something.
+Again I think all of these are definitely not necessary for the first version. Just things to keep in mind.
 
-**Alexey**: So it has all the information to prepare it but not the time to do it. right ?
+**Tim Beiko**: Yeah I agree just in general that came out in the timber off garden report that like the base fee update rule was simplistic to say the least and it is probably not a blocker to ship it right now. There is definitely some room for improvement there and I suspect it would be helpful to have actual magnet data before we were to tweak it because what we have right now probably works but it is not optimal and it's kind of hard to make assumptions about what the  usage conditions will be before. We actually deploy it.
 
-**Danny**: It is the continuous nature of like proof of work where you're always about to try to you're always trying to make a block this is I actually know i'm going to be proposing a block and call it four seconds so I signal that the work is done and then I don't have to have this like pending block operation running continuously which apparently is pretty heavy depending on the implementation.
+**Ansgar Dietrichs**: Agreed!
 
-**Mikhail**:  actually, yeah this random parameter makes it no in this parameter. I mean it is like is it is only known after the parent block has received so upon receiving the parent block it will 
+**Tim Beiko**: Cool just because we're uh about halfway  through already. I want to make sure we get to the rest
+of any final questions on the transaction Pool sorting?  okay  thanks guys this is really really good. Abdel do you want to give an
+update on the large state test nets and where things are at and how this could work with other clients. I  see that  you are chatting on discord.
 
-**Mark**: and every time the there's a new head the prepared payload needs to be called like i'm after in order to start building the block from that head?
+## Large State Testnets
 
 
-**Danny**:  ifthere is a reorg, yes.
+**Abdelhamid Bakhta**:  Yeah I will give some precisions about that okay so should I just give my update and the demo later or I will do both at the same time.
 
-**Mikhail**:  right Yes yeah and also if like the block from the previous slot is delaying it could arrive later but the proposer might want to 
+**Tim Beiko**: Let's just try to focus on the Large state testnet for now.
 
-**Alexey** so it seems to me that this reason the real reason why we have it right now not in original reason is that you wanted to make this operation of preparing parallel interruptible so that you don't have to keep because obviously you could run it in multiple threads and you know choose the one that you wanted but you really want to interrupt the previous work to restart the new work.
+**Abdelhamid Bakhta**:  Yeah okay, So basically we have a large state test net the idea was to have something comparable to mainnet,  so
+We managed to get a test net with 100 million accounts and 100 million entries in the state storage tree and yeah the problem is that we use the Besu specific feature which is to have a fixed difficulty . I forgot to ask if it was supported in Geth and Nethermind and it seems it is not. So I was asking basically Ramil that if he would be okay to hardcode it for the test net and I am also talking with Tomasz  about that in the discord channel but yeah basically that will be the only trick, we would have to do in the code base to make it work on the state and again if it would easy to generate the test net again. I would restart with different parameters but it will take two weeks to get the same state size. So I would rather hardcode the fixed difficulty value in the code rather than delaying the performance tests.
 
-**Mikhail**:  right it actually depends yes I mean yeah oh yeah we have an option here so we can add to the protocol that there is anOption 
+**Ramil Amerzyanov**: Yeah we are working on it right now and we made some. Another issue with base fee calculation, so we are trying to investigate it and so it is in progress. I will  write some updates today later.
 
-**Alexey**: no because I think it's everything else could be could be simulated with other means I think i'm trying to understand the real reason why
+**Tim Beiko**: okay nice and Tomasz would that work for Nethermind,  the hardcode the difficulty like that?
 
-**Danny** the real reason is that the when we were speaking with Geth on a call previously is that there was only the get payload which implied that either work needs to be continuously done before kind of like how pendingblock is done today. or it needs to be done at the at that call which can take a long time to get something valuable and now that we know what the proposer knows at least four seconds before proposal maybe eight   that they're going to propose and what they're going to build on they can send that signal and so that work rather than the continuous pinning block work being done all the time they can just signal to do it and then get it. there's the exceptional case that you then might want to handle where there's a reorg, in that time frame which is actually very unlikely in this this configuration but you could get say eight seconds before I think this is gonna be the head that's gonna be built on I know i'm gonna be the proposer i send it and then four seconds later i actually had to reorg and I want to override my previous repair payload and  then at the time of me proposing I call get payload and so the the motivator is is the is the prior thing that i've said but then you need to handle the case where rework happens which is why you might send to prepare payloads 
+**Tomasz Stanczak**: I am just implementing it now actually so we need to block handling and there are a few questions on this
+card. So I want to clarify how to get it ideally. I would start syncing it today.
 
-**Mikhail**: yeah right!  
+**Tim Beiko** : How long does it take to sync the test net?
 
-**Lukasz**:  i have a follow-up question is there any sense if like we get multiple prepare payloads to construct multiple blocks and then one of them would be chosen on gate payload or is like if we get another we definitely should cancel the previous work is there any like case for that 
+**Abdelhamid Bakhta**: Well it took roughly like something like maybe two days with Besu  with a full sync obviously yeah I
+guess.
 
-**Mikhail**: Yeah i've outlined in the like the section that is in in the bottom of the document. yeah it might be the case when you're um there are multiple consensus clients  that are using these that are sharing one execution client and they are concurrently building up who wants to build they want the payload to be built on top of different parent blocks but that's an exceptional use case and it should not be like.
-  
-**danny** yeah I mean that's also implying there's multiple heads which is not I think generally how this api is being designed
+**Tim Beiko** : Yeah my the reason I am asking is  if then we want to do this kind of performance test would it make sense to
+**schedule another call and  do that. synchronously with like you know all of us or not necessarily everyone here but Geth Nethermind and Basu and I don't know it's like a week from now  good enough to fix the bugs and yeah be ready for that or yeah because it feels like I don't know it might be easier to do this type of testing if we are  all on a call together.**
 
-**Mikhail**:  right and yeah and it will have to support like multiple versions of mempool from what I understand if we want to keep building the payload um on top of different hat and if if these two heads are on the same chain  right if this is if this is these are the parent and the child blocks so it doesn't make sense to keep building the payload on top of the parent block if you already see that there is a child. Yeah in case of the child has been delayed and
-was running late.
+**Abdelhamid Bakhta**: Yes maybe yeah we can just  default that  once the nodes are synced. Just I can submit a single transaction
+just to verify the consensus rules and then we can plan a call to do the actual performance test. If that makes sense?
 
-**Mark**:  just to understand that the dependency graph, so the only time, every time the the if you already called prepare payload and then you call like um new head I forgot what the fork choice updated, shouldn't it just,  I mean would you even need to call prepare payload again or
-would it could you potentially just have it assume that okay actually you need to restart from
-this new head and the dependency graph is always like to build a block you need a head
+**Tim Beiko**: Yeah that works for me Tomasz, Ramil do you do that work for you guys.
 
+**Ramil Amerzyanov**: yeah
 
-**Mikhail**: right but you should restart because this random parameter will be changed yeah it doesn't sound weird block choice
+**Tomasz Stanczak**:  sure any time.  I will be targeting today for the producing start. We will see how it goes.
 
- **Micah** the the random that's in there is only known by the next proposer is that correct?
+**Tim Beiko**: Cool yeah so yeah and you know, so if we get them fixed you know today or tomorrow uh they sync over the weekend then you know early next week we can probably have Abdel just send a few transactions to make sure it all works and schedule something for like maybe the same time next week or something. **I will  follow up on discord about the specific times.**  I think that to me this is like the last kind of big test thing we need to do in 1559 and if we can get that done that's pretty good. I have something else that's slightly related. Just want to make sure there are any other questions or concerns about the testnet?
 
-**Mikhail**: it's only according to the current spec yes
+**Tim Beiko**: okay uh yeah one thing I will just share my screen Vitalik I asked him to do this a while back and he did this week which was great,so the main reason for doing this test on the large state is like the fear that the large blocks cannot be handled on main net and **Vitalik wrote a  small explainer like why he thinks this is probably not even a problem.**
+ It is quite short. I like to encourage people to read it but at a high level. The biggest risk is knowing clients maybe cannot handle 25 million gas blocks and then if why wouldn't we just double the block gas limit and have them handle 25 million guest blocks all of the time rather than just doing 1559. He basically explains why that is the case so there is like three reasons why we cannot, just increase the gas limit a ton. The first is obviously the average block processing time will increase. If all the blocks are much bigger the second is that the risk of denial of service attack increases, if the  biggest block is  much bigger and the third is  the storage size growth rate will also increase. If all the blocks are bigger and one thing that is the first and last of these are really only impacted by the long run. Average block size rather than the maximum block size. We see on the network, so that means you know even if we can't do those three things given that 1559 doesn't increase the average block size significantly but only kind of sublot from time to time. The only issue we have to worry about is the second one and then  you know there are a few arguments why the second issue is maybe not that bad at all. The first being  which is going live into Berlin will help compensate for some of the dial of service risk based on storage access. So I think this is a very good point and also kind of a reason why it would be pretty  complicated to ship 1559 before Berlin. So having 29.29 helps with denial service protection and then the second argument is that obviously if we have a short-term denial of service it is less worse than if we have a long-term denial of service and 1559 actually helps here given that the  base fee increases. When  the gas uses more than 100 in the blocks this means that the cost to sustain a denial of service attack on the network kind of goes up exponentially with time, so you know realistically  attacks could not be very long and that means that you know even if you could create a denial of service attack. You are almost in a better spot after 1559 than we are today. The cost to do this is kind of a fixed cost and then the third argument is that the block creation process itself. Today is poisson distributed and that would lead to  having 2x spikes twix bikes happen on the chain roughly once a week just by randomness. This one I think is the one that is like the least fleshed out  and it would be interesting to see data for the first two arguments. Yeah **1559 is like a net improvement over the status quo and the risks are probably pretty minor.**  So this is not to say we should not do that. The performance test I feel like we are basically there but it's really good data. I think  to show that even for whatever reason. We can't sustain for like an hour a very high load or whatever 1559 probably still isn't a major  denial of service risk for maintenance.
 
-**Micah**:  okay 
+**Tomasz Stanczak**: Generally think that from an eip 1559 perspective the one thing that  we should do now in parallel to the final testing and implementation is just to ensure that there is** very active  dialogue with miners** about when the change will be introduced. What is their current stance is? They still have some concerns they would like this to address and some clearly  tell the community.  What the decision are the core devs  trying to go against any minor concerns, is there any compromise. So how exactly the transition will look and all the miners the majority of miners, what they say about the transition process?
 
- **Mikhail**: but there is a pr
+**Micah**: It is a giant can of worms.
 
-**Danny**:  yeah not to mention a fork choice updated might even  change the proposed shuffling and so you might not even be building a block anymore at that point So i don't think you want the forward choice to automatically interrupt this work.
+**Tomasz Stanczak**: Yeah if you don't open it now it will open itself.
 
-**Micah**:  is there a cancel build then in that Case yeah get up and get payload full choice changes you need to tell the execution engine hey stop building you're not coming up next you 
+**Micah**: It already has I don't know if you  hang out in the east or 1559 those three channels and then also on the youth research. If you subscribe to that there's like I don't know three new people a day that show up and complain about their fees going down with 1559 and we tried to talk to them so far. None of them have been able to formulate a solid argument besides I want to get paid more like that's the
+kind of the route that I have derived from most of them. It is just like I want more money. There are some other arguments that they make that they're worried about or they claim that mining will centralize in China but I think that was actually debunked earlier. Apparently I learned I didn't know this but apparently mining and Ethereum appears to be mostly in europe. I love china  which was surprising to me
+but yeah that's like the two things: one is I am gonna make less money I  don't like that and two is this is going to lead to centralization and the reason the centralization argument is kind of reasonable is because the people.When the profitability of mining goes away. The people that have the finished margins are the ones that are going to get kicked out. The people with big fat margins they are going to stick around and the people with very thin margins are going to get kicked out the belief is this is a reasonable belief that the large mining pools have the biggest margins and the small pools or single miners have the thinnest margins and so if we do something that hurts miners in some way then or decrease their profitability in any way then the people who are going to leave are going to be the thinnest margins. Therefore the non-pooled people are the non-like farm people and that can lead to centralization. I am not really worried about that because of the ethereum's price volatility. I think it has a far greater impact on that than 1559. That is my suspicion and we already have to deal with that. That is just the nature of mining is that it tends to centralize over time.
 
-**Danny**: User can also just know to cancel if certain time stamp has Passed.
+**Tomasz Stanczak**: Maybe  the last one sorry go ahead so maybe the last three searches. We want to have on paper the analysis of what exactly is the expected. The hash rate drops based on the responses from miners. Do we lose big miners or do we lose lots of small miners. What will be some kind of document that'll tell non-miners, this is what you were making before this is what you're going to make now based on all the analysis and then based on that see what responses are and try to judge what the hash rate drop will be and how it will affect the security of the network.
 
-**Alexey**   well it almost it's, it seems to me that like you know one thing I first noticed when I saw this separation is that there is this assumption about some state which is inside the so associated stage is a kind of this makes it a stateful api so when you do the prepare payload it creates some kind of stay that then you later rely on you know but then now we are coming to the you know the suggestion oh maybe it should be cancelable but then   you know when you call the prepare payload you implicitly think that the identifier of the state is very apparent hash plus random so if somebody else gives the same pair of numbers then they will be referring to the same one so I think maybe it's it's better to explicitly return some kind of a state id then you can manipulate it doing cancellation or whatever you want to do because there's there's kind of a lot of implicit state here and then it might be That different  it might actually be complicating the discussion
 
-**Micah**: i think it's technically stateless like I definitely see where you're coming from with it being a stateful because you're you're saying like you you anytime you have you know a then b sort of situation it generally looks stateful. i push back slightly just because the get payload actually contains the exact same information set and so the repair payload is more of just like a warning that you can choose to heed or not that's saying hey i'm going to be asking  for payload later with these exact parameters feel free to start working because when i ask for it later i'm going to need it right now and the the execution client can choose to not do that like it does
-technically you could have an execution client that completely ignores repair payload it is not actually required for the protocol.  it's just required if you want to be able to have time to actually build useful blocks like if you're okay with not building useful blocks you don't
-technically need it which is why I think  it's it feels like it's not actually stateful just because it's more just like an advanced warning system.
+**Tim Beiko**: so i think there's a there's a **few challenges with doing such an analysis**, the first is like people are obviously biased in their responses right it's like you know before the change goes live every miner has an incentive to tell you that they are gonna drop if it goes live and then if it does they are not like bound to that. I  think the other challenge is we don't know there is no good way to model. How much their revenue will decrease because we don't know the amount of high tips that people are willing to pay for things like arbitrage and what not. So it could very well be that for most transactions the fees go to barely anything but for the highest paying ones. The fees still stay relatively constant and those were a majority of the transaction fee revenue anyways. I think with regards to the security of the chain.
+A few things worth noting is like one ethereum is still like by far the largest GPUchain and I think that would probably still be true, if we lost even a  large amount of hash rate. It might be worth finding out exactly how much and that is probably the biggest risk. We don't want to be the second largest GPU chain because then you open up a bunch of  attack vectors. Then the other challenge is the hash rate is at an all-time high. Right now which makes it obviously less profitable for miners given the increased competition and it's hard to predict how the hash rate will evolve because there's more than 1559 affecting it right. There is 1559 obviously but then there's the price of ether which is a big factor  and there is also the willingness to pay high transaction fees which is mostly fueled by d5 right now. So I would be very uncomfortable providing an estimate and having people make their decisions based on that because it is such a dynamic thing.
 
- **Alexey** well it is essentially you know what you said is that the the combination of parent hash random is timestamp in there it's like a kind of this id or this stuff which is
+**Tomasz Stanczak**: Yeah so for estimate it makes sense but maybe some just this kind of clear communication of this is what we expect. To be the effect of the change on miners and this is just to inform community and these miners are saying this maybe collect like
+are there any miners that're saying they're going to join because of that change. If the market changes even as those statements might be biased. As you say at least informing the community.  What the collected opinions from minors are and what their stated actions are so the community can prepare  for uh like to be to know at least whether to expect the turmoil or to expect the smith transition.
 
- **Micah** i wouldn't say it's an id it's more just like i'm about it's saying i'm going to in four secondish i'm going to send a request ask for a thing and that request is going to ask for these something built that it's a function of these  four items, if you didn't get that for some reason you would still get the follow-up request and you would still be expected to respond to the follow-up requesting just the same. Prepare payload are like a heads-up.
+**Tim Beiko**: **I can definitely look at it trying to collect some statements and  just list the general changes.**  I guess you know the  like philosophical argument that you like to end up with. Should miners be actively part of the ecosystem and like influencing decisions or should they be known price takers where like the ethereum protocol has certain properties and then they can choose to mine it or mine another chain or not mine at all. I think that most of the disagreements come in.
 
- **Alexey**:  sure but you know there's a lot of different thoughts of questions if you don't specific specify what is the id then you say okay what if I have one request which has got parent hash and timestamp but then other one has the same parent hash but the different time stamp do I need to keep the first one or replace it?
+**Tomasz Stanczak**: I think it's tough I'm not having any statement on this one here I am just saying that we should clearly communicate what the process will be. We take the stance that even as miners strongly oppose or if they do not strongly oppose the state even as miners and mildly oppose or yeah so do not oppose whatever it is even then we decide to go forward with the change and then the community can expect that there'll be some potential risk around the change because the miners are not aligned with cordev's.
 
- **Micah**: I see.
+**Micah**: Historically it has been very difficult to get feedback from miners like you. This non-stop stream of people coming into the
+channels and what not complaining and saying what their opinions are but when you try to actually reach out to the big pools like F2pool and Ethermine and sparkful you get  no response. It's very hard to actually talk to the farms like the farms are non-communicative. I don't know why that is but historically that has been the case. We can get people who say they are miners to show up and talk. But no one will admit to being a major farm or like a large scale fact miner.
 
-**Alexey**:  i mean you know oh no of course we probably know the answers to all these basically kind of request id or something.
+**Tomasz Stanczak**: I think at least in the past we were saying that Hudson was  having a channel to  connect to.
 
-**Micah**:  yes so an execution client could definitely implement that by just literally just concatenating those four parameters or hashing them and that would definitely function as a request id and I can definitely appreciate an execution client choosing to implement that that way and so that way you can decide you know okay this is the one that's associated with that like internal if your internal architecture that's more amenable I think that would definitely work because you will get the exact same parameter set in the get right.
+**Micah**: Yeah he has a channel to talk to them but that channel hasn't historically not my understanding is that his channel
+has historically not worked for getting feedback from them. If you give them a survey to fill out ,you can just won't get anything back
 
-**Mikhail** i would like to read the prepare payload call as like in similar way as in the proof of work the new block has come and become the head and you need to restart the process which is constantly happening the process of building the block,   If yeah if this is turned on I don't know if it's turned on or not. if there is an option to turn it on or Not um I mean like the Geth  behavior is. So, Danny anything to discuss here?
 
- **Markl** i'm not sure what would cause this but what would what would cause an execution client or a consensus client not to send prepare a payload ahead of time and for where they were just suddenly forced to just call get payload and then if we're requiring that it be immediate would they just send something empty?
+ **Tim Beiko**:  I can follow up on that. We did things yeah we did get some feedback from so when we did the the first outreach, we got some feedback from miners. I think generally most of them didn't want to be identified with regards to their  entity. I might be wrong  some of them might have wanted but the general senses. People didn't necessarily want to be identified but I can reach out and see what people might be comfortable with and how we could aggregate their people.
 
- **Micah** i don't think it's expected that that would happen I think it's just we need to design for in case like you just got a connection up for example and the consensus client had like as soon as your connection came up you're immediately up and so you only got to get just as a hypothetical 
+**Tomasz Stanczak**: As the names of the mining pools that are mining blocks. They are publicly known so we can just
+provide at least a community saying these miners decided not to comment on the change these ones are for this ones are against
+and now we're just clear on that. There will be like eight or nine entities of the pools or or big miners than we see. Assuming that we can actually identify who is behind the pulse but I think this is not really a secret
 
-**Danny**: it's kind of like how blocks are continuously mined and tried to be made better simultaneously and so very likely the logic would follow if you had to do something instantaneous that would be that like initial likely empty block with very little state transition and the hashing Completed. and yeah I agree that Given The that although prepare payload should be expected and which is the proper way to run this api that get payload should be able to be called in the event of like weird synchronization problems without the prior prepare payload.
+ **Ansgar Dietrichs**: Yeah I think that is important but I also think uh Tomasz  had a good point in just saying that like this is
+something we should definitely talk about at some point on the all core devs, so yes because I think that's a proper place.
 
-**Micah**:  is it is it a correct assessment that there's we don't know of any like specific situations where you'd expect to receive only the gut it's just kind of hypothetical edge cases?
+**Tim**: Yeah and I will try to let you know before this gets brought up on all core devs again to follow up about the miner conversation and both try to list. I think we can list the objective changes that 1559 will bring to miners. You're gonna get the tip but not the base fee. Hypotheses about how this can affect them and try to get their feedback.	
 
-**Danny** Yeah
+**Ansgar Dietrichs**: But also just to be clear right the merge is probably coming within I don't know I don't want to be optimistic but like 6 to 12 months after 1559. So this is at the point at which we just sunset mining completely so yeah I think it is important to keep that in perspective. We are talking about the last 6 to 12 months of mining yeah.
 
-**Danny**:  i don't see any use case for that i think it's a fail a failure so you could handle the get payload failure i don't know I think you don't want to handle that failure statefully though 
+**Tim Beiko**: Yeah but I think I like Tomasz's point where we might very well decide to go ahead even if there was say like 100% opposition for mining and just say that what other people will mind the chain and what not and that's fine. But at least we can be **clear with that decision and  people can expect some sort of potentially turbulent upgrade and that's very helpful for folks like say infura or exchanges or whatever to know.**
+: Yeah so just to be clear to you I  don't think that because we collect negative feedback from miners. We should like not do the change but we can make a conscious decision to do the change even though there's negative feedback because there will always be negative feedback from any stakeholder group on any large change to the network right.
 
-**Mikhail**: right and we there are some sections in this document that covers this kind of failures yeah there is also the message ordinance section which is new which proposes much like just strict message orderingand we can discuss it later so unless somebody wants to say, i think we can move.
+**Tomasz Stanczak**: Yeah  I am not saying here and like  withdrawing from something that has quite clearly supported on the core dev 
+channels but also not to be quiet about the lack of support from owners and be clear with the community and if we decide to say okay we're going with it even against some opposition then we have to be clear and not try to just hide it  and be quiet about that so the community needs to know because it may actually lead to some potential problems during the transition. Some miners can be very adamant. If they feel totally ignored and not even included in the communication channel, so I am not saying that there will not be some heavy lobbying and campaign on twitter  and so on but the more you try to hide it the more of a problem it may become.
 
-**Mark**:  here a second question, if the content or i the execution client fails to fails to respond to get payload in time and you have to propose a block can you just propose a block with an empty execution section like basically like a beacon block as they are now consensus client  
+**Tim Beiko**: Cool  so the last  thing I guess uh there were two more things I had on the agenda so  Abdel  put together an eip for the base fee opcode and he also had a quick demo for how to join the 1559 testnet  2718 as well. Is there anything else that people want to discuss just because we only have 20 minutes.
 
-**Mikhail** like what does it mean fails to respond in time so it will respond later or what or not respond at all 
+**Micah**: I would like so i would like to spec out  2718 sooner rather than later. I am not a huge fan of letting it wait but everybody else wants to continue waiting on that I  will concede.
 
-**Mark** if yeah supposing it doesn't respond and you have a you know you have to propose this block will the beacon client be able to propose a block with empty execution payload itself, is a fallback.
+**Tim Beiko**: So for 2718 if we have like the test net, test over the next week or two does it make sense to do 2718 right after that?
 
-**Mikhail**: theoretically it could be implemented as a fallback and with the timeout and get payload response but yeah 
+**Abdelhamid Bakhta**: we can do that in parallel  I think because we have the other test net to do some changes and doing integration testing. So  I will not wait for the performance results to start.
 
-**Danny**: but the state does the state route Change?
+**Tim Beiko**:  Well I guess we can do it in pairs I guess Nethermind and Vulcanize can you also do it in parallel or or is it valuable to maybe just start with Besu and then add the other clients.
 
-**Mikhail**: No.  it should not as we don't have the rewards anymore 
+**Tomasz Stanczak**: Yeah we already have the implementation for 2716. maybe not with the latest changes that are not fully agreed on but we do have an implementation okay we can start yesterday.
 
-**Micah** so i thought that the clients could do fill slots without an execution payload instead not correct or is that changing in the merge?
+**Abdelhamid Bakhta**: Did we agree on the transaction types we are going to use etc the value of the actual value.
 
-**Danny**:  that is not
+**Micah**: we haven't spec’d  that at all for like someone needs to submit a flip request. Probably me to 1559 that adds in 2718 integration and that's part of that. We will pick  transaction types. I am going to most likely just pick whatever after 2930. I forget which number to use for them but at least that makes sense.
 
-**Micah**:  okay so there has to be something in that place and that something needs to be valid 
+**Tim**:  I  guess if you can just re-share that pr Micah in the dev channel or something just so people can
+review it, that's probably a good way to start.
 
-**Danny**: you have to still essentially be able to chain something even if that something was empty
+**Micah** : I need to write it first I have been waiting to write everything already 
 
-**Mikhail**:  right
+**Tim Beiko**: Cool  if you can get started on that then we'll review it when it's when it's ready and we can get that all right.Anything else before we go to the base  up code in the testnet demo. Okay Abdel over to you.
 
-**Danny**:  and that's what and that is you need to be able to compute the hash  and a few other things.
+## BASE FEE opcode EIP
 
-**Micah**:  okay so it needs to be a valid block execution block header
-at least ? like that's the minimum required to fill a slot
 
-**Danny**:  yeah you could,  so I think that in general we're designing under the assumption that you can make this request happen and otherwise your client which is the unification of these two things failed you and you weren't able to produce block. you might be able to design some logic in the beacon chain client to be able to bypass this by hoisting some of the logic into there but I don't I wouldn't go down that path initially
+**Abdelhamid Bakhta**: Yeah so the create basically of code so nothing crazy. we just  want to add a new evm of code to get the
+value of the base here of the current block and yeah so I created the pr. So basically with the value and the proposed gas price and I did the nominal case and we decided  to do exactly what we do with unknown object for example if we originally end up code that has the value of the base your code we just throw an invalid operation error like we currently do so yeah nothing crazy, so I created the EIP and  waiting for review so MIcah did the first review and merged in the master.
 
- **Mikhail** right I agree with danny here so we have a client and is we have like a composite client and it just fails to produce a block in this case to propose a block whatever the reason is. and it should be identified i mean Yeah definitely the empty like the failed proposal will be noticed by their owner and the investigation will happen
+**Tomasz**: So what does the gas price  return? What does the base fee return so the gas price will return the actual price to the transaction right?
 
- **Danny**: yeah validators they notice they're monitoring their monitoring infrastructure is so sensitive any time even they like get a non-optical association even when it's included they get warnings and they complain.
+**Abdelhamid Bakhta**: Yeah exactly and the base here returns the  current uh basically in the block header. So yeah very simple yeah
+and yeah that's it about the EIP.
 
-## Current block hash
+**Micah**: do any clients here think  that EIP will be hard in any way or is that something that we can shoot in.
 
-**Mikhail** so okay anything else here  uh next thing i've added this confirm block hash stuff here with the like um temptative list of tags for jason rpc which will be extended from what we have now and there is the question by terence so and the proposal to like repurpose your list for the weak Subjectivity checkpoint which makes sense but could potentially break some apps I don't know or tooling that use get blocked by number earliest to get the genesis i don't know if this is a really really um frequent use case and important usecase yeah but we can discuss on this later I guess on Discord or on this kind of call . Okay yeah also there is like the there was the block processing flow now there is the **block proposal flow**  which covers the like block proposal stuff with yeah there is a couple of sequence diagrams that that are the example of how the block proposal flow should happen. so we may take on it and  take a look on it and get more understanding, I hope so yeah So any questions to the minimal set of methods before it moves to the transition process? Cool
+**Tomasz Stanczak**: I think it'll be super easy to implement  at the same time if  it doesn't happen at the beginning. It's not a big issue.
+ 
+**Abdelhamid Bakhta**: let me show my screen . Can you see it? Okay nice so basically yeah this is a network status page for the new testnet so currently we have four Besu nodes. So we are close to one million blocks and yeah as I said ,we have 100 million accounts on this test and basically yeah we implemented the tool to join the test net easily. So  the idea is net and 1 million 100 million entries in the state storage to build the client agnostic tool but for the moment. I only have a bezu implementation but the idea is that after that I can try to add the determination and get support if you give me just some basic stuff like a binary. Capable of doing 1559 stuff as the genesis and the conflict file and then I could try to add the determination and get support and basically you install this command line tool and then you simply run e1559 run. So it will download the config file templates . It will prompt you for a name to display in the stat so for example implement course nine and then the text that you don't have basu  installed on your machine because by default besu  is the default choice. I don't have the other client support at the moment. So  I will install besu automatically. Okay so it prompts the command line to
+run the node but if you press enter it will run automatically and open the network stages page. So now bezel is running and it starts to connect to the peers. The synchronization started and yeah basically if I refresh again I have the new node and it starts to sync. So the first block is really big because I generated the tool basically to fill the network with a lot of accounts and a lot of  entries in the smart contract and there is another command also in this tool. Basically it's a simple faucet so for example I want to add some it to this address to play with it so basically if 1559 for set with the address and you will get 0.5 it  on the test net. Yeah okay this is a 0.5 it's and  so the idea is to have a simple tool to join the test net and to have more users running the node on 1559. We also have a tool to basically submit transaction to this testnet because there is no implementation yet in the wallet provider so basically if you want to submit a 1559
+transaction. you have an estimate button that will generate a pickup for you and you can submit the transaction and you have the link to the block explorer and yeah basically you can submit a 1559 transaction.
 
-##  Transition process
+**Tim Beiko**: Cool anything else anybody wanted to share, discuss, bring up. Okay well yeah thanks everybody. I guess  we'll follow up on the discord dev channel to set up the large state test net. Micah  will also be waiting for your pr and we'll review that and then I guess  we can figure out based on the test net test when we want to have another call or follow-up This is looking good yeah thanks.
 
-**Mikhail**:  um the transition process is also in the minimal methods like set but it's something new with respect To to the Rayonism which is a consensus Rpc okay so we will start from this one yeah terminal total difficulty override. i would rename this to terminal total difficulty updated because it's not only gonna use for override but for also to set the initial value of the terminal total difficulty that is computed by the consensus layer and the merge hard fork and then communicate it to the execution client. so it maps on the terminal difficulty property from the eip and yeah it could be reused further to override the terminal total difficulty with the new value in case if we want to accelerate the merge and there is the corresponding pull request to the consensus fx repository that adds this possibility and yeah the like scenario will be
- the following the consensus client gets restarted with the terminal total difficulty override Parameter which will and this is how the overridden value will be passed to the consensus client and then consensus client upon a startup and connection to the execution client will communicate this overridden value and the execution client must update this value and act accordingly according to the Eip specification.
+----------------------------------------------------------------------------------------------------------------------------------------------
+## Attendance
 
-**Danny**:  yeah we should probably state and i  think this is probably implied in how
-this event will be handled in 3675 but probably say that it's a you know it's a no op or it can be ignored if the  transition has is in process or completed. maybe scope transition implies that
+- Ansgar Dietrichs
+- Abdulhamid Bakhta
+- Ramil Amerzyanov
+- Baranbe Monnot
+- Micah Zoltu
+- Rick Dudley
+- Tim Beiko
+- Tomasz Stanczak
+- Pooja Ranjan
+- JosephC
 
-**Mikhail** yeah um okay see  actually yeah we should also add the corresponding event to the eip like which says that that the terminal difficulty should be updated upon receiving this event and with this event will the new value will come. okay so there is yeah let's go through like these two and then stop for questions. **terminal before block override** is the
-and another way to accelerate the merge so in this case it it overrides also the total difficulty transition based on total difficulty and directly specifies the  exact terminal proof of work block
-and it means that the proposer will need to be start building the proof of stake chains to to build the transition block on top of this exact proof-of-work block. it also implies that that execution client for example should must stop processing blocks after this one, it must disable the block gossip upon receiving this message and some other stuff which is  which is not yet clearly specified by the eip but it will be um specified like but once we once we get to this functionality. so it will be updated in the eip.
+## Next Meeting Date/Time : TBD
 
-**Danny**:  so first this is also really just the first method is part of that minimal set like to get you know implementations going right?  you mentioned minimal set do you mean minimal set like minimal set to be a functional client or a minimal set to on like the next wave of
-Uh devnets?
-
-**Mikhail** no no it's like minimal required set for for the other function client so this transition stop is critical yeah okay so yeah there will be a corresponding um parameter in the consensus clients that Will set this value and communicate it and then because this client communicates it to the execution client likewise with the total difficult stuff.
-
-**Mark**: would there be any advantage to using a block height instead of a block hash because you know you only know the block hash right as It's as it's been made the 
-
-**Mikhail**: when it is certain block because in case of like attacks there might be multiple blocks at the same height and we need to specify the exact block that writes the chain over.
-
-**Danny**:  this is an emergency like coordination in which you're picking a hash in the past that you're coordinating on and you're probably taking some chain down time  to do so
-
-**Mark**: gotcha and and the terminal total difficulty is under unless under like attack scenarios is Superior and we also you don't do the block height you do terminal total difficulty
-because somebody could have like a cheap shadow chain  that could  reach a block height much faster than main net and try to take over the merge so terminal difficulties chosen when
-you're taking something in the future 
-
-**Mikhail**: yeah 
-
-**Micah**:  two questions-  one is it expected that the execution clients will have a default terminal difficulty baked in and they'll only receive that message if there needs to change or will they always can they depend on always receiving at least one of those messages at some point before it happens?
-
-**MIkhail**:  they will receive it. it's not possible to to know it in advance. so it will not be hard coded.  i mean it's impossible but we we yeah we decided to the decision was made to use the computed value so it will be okay.
-
-**Micah**: so the execution client will always receive at least one of those messages is that accurate the internal total difficulty override?
-
-**Mikhail**:  right 
-
-**Alexey**: you mean you mean receive it during one session so at the end of the beginning
-of every session it just gets one of those things right that's the assumption?
-
-**Mikhail**: that's a good question like session of communication right yes so because then it doesn't make an assumption about whether they stored in a database or they forgot about it or whatever 
-
-**Mikhail**: right right right so yeah it will be computed once but it should be communicated every session as you've said
-
-**Alexey**:  yes I think it could be written in the spec that the consensus client needs to send those at the beginning of every session to make sure that they in sync
-
-**Mikhail**:  right here is the message here is the call that communicates like this kind of stuff total difficulty for a block cache so and we will reach this place in the dark okay at some point
-
-**Micah**:  so you may actually receive that status message but not the override would that
-be accurate
-
-**Mikhail**:  right if it's been like um yeah yep exactly so the the the override will happen only once when it is overwritten or it is set initially 
-
-**Micah**: so second second question the for execution clients is it easier for any of you to have the block number included in addition to the hash for that   terminal proof of work block override like when it comes to finding some old block um is the hash always enough you never need a block height like there's no database architectures that make are easier to find the block with a height?
-
-**Mikhail**: my intuition is that it is straightforward to requested by block hash either from the network record from the storage log hash should be fine so assuming we just
-
-**Lukasz**:  block hashes in the database 
-
-**Micah**: yeah that's as I wasn't sure if everybody's database has a index by block cache or some of them maybe just actually have like a linked list for example.
-
-**Tomasz**:  no it's index but block hash, we have also separate indexing by number but it's not from ​​number to block but from number to a list of blocks if you have multiple Siblings but by harsh you can find both the main branch and the non-canonical and non-conical branches so by hash is the fastest way of accessing the blocks 
-
-**Marius**: same for us
-
-**Mikhail**: so any other questions here?
-
-**Mark**: if the session starts with um communicating the terminal difficulty um what like then the purpose of these two calls is if you is so you don't have to restart a session  if there's an emergency um 
-
-**Mikhail**: yeah actually you will have to restart the session if it's yeah the client will restart it so 
-
-**Mark**: so what what is the purpose of these two calls then like how would it be different 
-
-**Mikhail**: Right 
-
-**Micah**: one can imagine a consensus client where you could override the terminal total difficulty or the internal proof of work block via an api without a restart yeah I don't know if any of the consensus clients will do that but like from a design standpoint I can see that as being very reasonable like in theory anyway
-
-**Mark**:  it's the consensus client that sends one of these two terminal messages and right they also start the session with information about the terminal
-
-**Micah**:   i see so the both of them can change at runtime and one of the total difficulty isn't
-actually known at startup. like today for example we don't know terminal difficulty there will be a point in the future where we will learn what that is and it was some time after the merge is
-scheduled and so ideally we wouldn't W nt to have to restart everything just to propagate that new information 
-
-**Mikhail**: right this could be sent during the session and these two will be sent
-could be sent at the beginning of the session that'd be sufficient 
-
-**Matt*: okay 
-
-**Mikhail**: but this one should be supported but this could be supplanted by status message if we will eventually agree on adding the status one.
-
-okay so moving on to get before block. okay this is actually this has um it pulls the same set of data that the get blocked by hash. the only difference here and this is important is that the execution client should request this block that requested by this hash from the wire if for some reason it hasn't been received from gossip and yeah we might not want to implement this um method and instead use the get block by hash but imagine the case when  the whole the the node stuck at the transition because  it hasn't received the terminal proof of work block why I gossip. I am wondering how likely this could happen and yeah if if it happens only a manual restart can help to recover from this case from this situation so it would be great if we have this one but i'm open to any opinions on that.
-
-**Danny**: So what exactly is happening with when when would this be called?
-
-**Mikhail**:  it will be called when the transition block is received the transition block is the first proof of stake block in this system and this method will be used to pull the parent of this block and the parent of its parent to verify that this is the valid terminal for a block and yeah this code is  running in the fork choice of the consensus client to accept the block
-
-**Danny**:  when you call, okay so it's it's I have a proof-of-stake block and i'm concerned whether it actually was built on the terminal total difficulty block like on a valid terminal block and I use this on?
-
-**Mikhail**:  yeah you may use this but it doesn't has this property of  making the execution client to pull the block from the wire if it's missed in the local storage 
-
-**Micah**: so this is basically saying because this client is saying there exists a proof of work block out there that we are very confident exists if you don't have it go figure it ut like do whatever you need to do to  get this block um whereas get get blocked by hash normally it's like hey here's the hash let me know if you have this block and we want to be more authoritative here because this is the point where the proof state client is or the class client is taking over right and so they're saying you will you must have this block for me to continue working  is that accurate?
-
-**Mikhail**:  right, right 
-
-**Danny**: but otherwise we're getting stuck here and they imply that when they run execute payload on the transition block too  because the payload has the parent hash and this parent hash and you should go find it otherwise so i i'm not, i think i'm not understanding what exactly this method is used for?
-
-**mikhail**:  you're not executing payload during the fork choice right so you're checking that this is the right um this is the right proof of stake block like the right transition block um so with respect to the transition process not with respect to the like execution yet so it will be executed later but at this point you just want to understand before falling into the state transition function 
-
-**Danny**: what is pow block does that include terminal difficulty in it or something 
-
-**Mikhail**: yeah let me open it here so here it is yeah it has all the required information here is what's going to help me and here is the code right so it's before the state transition and it's important to be before. and if if we get stuck here so we are not doing the state transition and that's it 
-
-**Danny**: so essentially where another client wants to know that this is actually a valid   terminal proof of work block the when it sees the initial transition process and the exist the other methods don't really help us ascertain that and so there's an exceptional call here on this transition to make sure that somebody didn't create like a bad uh transition block just just because it might be a valid transition it might not have picked the right parent block or a valid parent block okay Um i suppose that payload can can do that though for you because execute payload knows the terminal total difficulty and could tell you if you built off of something invalid but it might be good to just be explicit here.
-
-**Mikhail**:  the execute payload actually doesn't know about all difficulty but we can
-check it inside of the stage position that is what you mean?
-
-**Danny**:  i'm saying the execution client knows about terminal solid difficulty and so if you did execute payload and it was the first and executive 
-
-**Mikhail**: oh yeah it's being built off of a workblock it could know if that was not oh yeah you you mean we can you  we can defer this check to the execution client yes
-
-
-**Danny**: Right yeah i'm not convinced that that's correct I just am now understood yes yes why this block why this exists okay okay I want to  think about it a bit more I don't think i have much more to say on that 
-
-**Mikhail**: yeah we have already some implemented we can use this one but as it's been said it doesn't go to the wire if the block is missed um uh the question to the execution final
-mirrors how often the do you know how often how likely the gossip to be  to not deliver you a block or its hash um how often do you do do you do your like clients have to go to the wire to pull the parent of some block that you have received but for some reason you've missed the parent block.  yeah I agree with micah butm 
-
-**Lukasz**: so this is fairly unlikely but it happens especially on like some network blips etc
-
-**Mikhail**:  so yeah if you say that we are pretty confident that that this method will work um well so we will just remove this from the design space and forget it 
-
-**Alexey**: well it might not work but we we're kind of thinking that the the the probability of this occurring everywhere it's very small like it might occur in one or two nodes or something so it means that if yeah there will be a very little portion of nodes that might get stuck right if we even have these kind of nodes 
-
-**Danny**: so yeah if you if you follow the like execute payload path I think the input implication is that execution execute payload if it couldn't if it didn't know the parent would go find it with the network so it might be better to just run that path. 
-
-**Mikhail**: then we will have to get to this check after execute payload right after the state transition and the execute payload will actually has an additional semantics for the transition period um it will need to go to the wire and pull the block if it's it and pull the parent block if it's not in the local storage.
-
-**Micah**: I already it already has to do that though right in order to validate the current block you need to know what the parent block was you need to have seen the private.
-
-**Mikhail**: right but currently a consensus client guarantees that that all previous blocks has been sent to the execution layer.
-
-**Danny**:  that that i think actually when you start talking about failure modes and synchronization issues between these two pieces of software that like the  what we've previously discussed is say uh say the execution engine fails it gets restarted and it's 10 blocks behind and and the beacon chain client inserts a block that the execution client can then say no I don't have the parent or it could actually just go to the network and get all the you know recursively look up those ten blocks and handle itself.  so it's not out of the
-question that yes your slide actually does do some self-mending when it doesn't have a parent.
-
-**Mikhail**: Yeah that might work but if in this case execution client falls into the state sync to pull the state and the apple headers it might take some time which is but we are the transition process like it's time critical. pulling the block from the wire may also take some time but probably it is like yeah but probably it will have to pull uh like one block and its parent and so forth um yeah
-
-**Micah** I n all happy paths it should already have the parent block I think the primary unhappy path is when someone act actively is attacking the transition and they have mined a the first consensus block on invalid terminal total difficulty proof of work block that's the time where you would maybe get a request to hey um execute this block the client doesn't have it because it's not a valid block and it never accepted such a thing.
-
-**Mikhail**: okay um so we are like roughly agreed that it would be better to rely on get locked
-by hash right and on the blog gossip so let's just I think i'm with danny i prefer relying on just executing the block later but this might be a good conversation to move or discord since run out of time.
-
-**Mikhail**:  right right right um okay the next one is sync.
-
-## sync
-**Mikhail**:  there was a well like great work done by alex and get team on the merchant proposal i've outlined like this this thing status was in this document before but there is this sync checkpoint set which is required by which is yeah is is one of the required methods here to send the  to make the execution client aware of what is the block header at the big subjectivity checkpoint and consensus client knows that what's the header is because it pulls the state at the quick subjectivity checkpoint and can directly send it to the  execution client this is also the first step of the of thing process so it's like initiating the sync process. and also might be i might be a clear evidence that the execution client should switch to the proof of stake mode. so i yeah a bit of context on that,  we will have the execution client software after the merge yeah after the merge happened and before any execution client software updates  the execution clients will start  in the proof of work mode by default as they don't know that transition has already happened and yeah they will go to the network to look for the block and the peers with the   the greatest total difficulty value and so forth and listen to the gossip and other stuff  and yeah we'd like the consensus client to inform the execution client if the transition transition has already happened and this is how it could be done so once this checkpoint said message sent um aside from the initiating the sync process um the execution client may switch to the proof of stake mode and listen to the consensus clients instead of listening to the blog gossip and doing something.
-
-**Dankrad**: does this have to be sent every time the execution client is started?
-
-**Mikhail**:  i guess no it's it should be sent only  on the fresh client startup when there is no box or state in the local storage. so if there is already some state it should not be sent this checkpoint said actually it depends if if you're behind the wick subjectivity checkpoint then it
-should be sent again.
-
-**Dankrad**:  I guess no because you just said that it automatically it starts in the proof of work mode and that sounds.
-
-**Mikhail**:  okay it starts in the proof proof-of-work mode because it's the fresh client and it doesn't know about the transition has happened on the network.
-
-**Dankrad**:  wait but we are gonna put the the transition difficulty like into the hardt fork proof of work as well right? no. I mean i want to avoid the situation like imagine posts posts   like
-post merge someone ex someone's ex sorry someone's consensus client accidentally crashes right  the execution client restarts and now they are in proof of work mode but they don't know it and their adapts will automatically use some proof of work chain that's like uh not really the ethereum chain that sounds dangerous.
-
-**Mikhail**: right but yes but if they start after yeah this like switch I think it should be persisted by the execution client inside storage. so it will just start up in the previous state mode if it's been informed about it previously even after restarts.
-
-**Micah**:  and and also the proof of work client should if it ever received and saved the terminal difficulty it should refuse to ever accept any blocks beyond that right?
-
-**Mikhail**:  right, 
-
-**Dankrad**: yeah exactly and also shouldn't we put the default value for that just in the client as an in the source code so that it doesn't have to like what if someone just keeps running a proof worklight without starting up their beacon client at all then once again they could end up in a situation where they keep following the proof of work chain. yeah so I think the default behavior should be to stop like all proof of work clients should ideally just stop working if they aren't connected to um a consensus client. all other behaviors are gonna be extremely dangerous.
-
-**Micah**: i thought we didn't know the terminal difficulty until like a week before then merge or something? did that change I haven't followed that closely.
-
-**Micah**: yes so it will be communicated like and it'll be communicated but we can't hardcode it because it right?
-**Mikhail**:  right we won't know it until after everybody's deployed their clients
-
-**Dankrad**:  Right,  why can't we just like do it but like with other hard forks where we all agree on one block height we keep they I mean i thought the end points to set it are for emergency like if you say like oh we need to change it but like.
-
-**Mikhail**: yeah i'd stop here and let's continue um with this discussion on the Discord
-because we have one minute to the next call okay thanks everyone um we'll see you soon again bye bye thank you bye thank you! 
-
-### Attendees
-
-* Mikhail
-
-
-* MIcah
-
-* Danny
-
-* Mark
-
-* Zahary karadjov
-
-* Alexey akhunov
-
-* Lukasz rozmej
-
-* Jared doro
-
-* Gabriel rocheleau
-
-* Dustin brody
-
-* Protolambda
-
-* Dankrad feist
-
-* Alex stokes
-
-* Josef
-
-* Lightclient
-
-* Lakshman Sankar
-
-* Sasawebup
-
-* Trenton van epps
-
-* Tomasz stanczak
-
-* Adrian sutton
-
-* Mamy
-
-* Terence
-
-* Marius
-
-### Next meeting
-(Unannounced)

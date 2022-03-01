@@ -1,155 +1,100 @@
-# The Merge Mainnet Readiness Checklist
+# EIP-1559 Mainnet Readiness Checklist
 
-This document outlines various tasks to work through to make the Merge ready for Mainnet release.
+This document was originally meant to capture various tasks that need to be completed before EIP-1559 is ready to be considered for mainnet deployement. EIP-1559 is now included in the London upgrade, so this document should serve as a historical reference. Sections may be updated if they are still the main source of truth for the efforts. 
 
-*Note*: The set of items is not final and will be aligned with ongoing R&D and implementation work.
+## Implementation
 
-## Table of contents
+### Client Implementation Status 
 
-<!-- TOC -->
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+- See the [London specification](https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/mainnet-upgrades/london.md#client-readiness-checklist).
 
-- [Specification](#specification)
-  - [Consensus layer](#consensus-layer)
-  - [Execution layer](#execution-layer)
-  - [Engine API](#engine-api)
-  - [Public facing documents](#public-facing-documents)
-- [Testing](#testing)
-  - [Unit tests](#unit-tests)
-  - [Integration tests](#integration-tests)
-  - [Stress tests](#stress-tests)
-  - [Fuzzing](#fuzzing)
-- [Testnets](#testnets)
-- [R&D](#rd)
+### Client-level Open Issues
 
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
-<!-- /TOC -->
+- [x] DoS risk on the Ethereum mainnet
+    - Discussed in the [AllCoreDevs call #77](https://github.com/ethereum/pm/blob/master/AllCoreDevs-Meetings/Meeting%2077.md#eip-1559) and [#97](https://github.com/ethereum/pm/pull/214/files?short_path=4d89329#diff-4d893291250cf226c77e67ad708be6f2) EIP-1559's elastic block size effectively doubles the potential effect of a DoS attack on mainnet. Solutions to this are outside the scope of this EIP and include things like [snapshot sync](https://blog.ethereum.org/2020/07/17/ask-about-geth-snapshot-acceleration/) and [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929), which was deployed in Berlin. 
+    - [Write up](https://notes.ethereum.org/@vbuterin/eip_1559_spikes) by Vitalik about why this is perhaps solved once EIP-2929 is live. 
+    - Because EIP-1559's `BASE FEE` rises based on block gas utilisation, a DoS on the network would either have an exponentially increasing cost (assuming no collaboration from miners and other transactions are allowed to go through), compared to a constant cost today, or it would be costly to miners (who would need to pay the `BASE FEE` or censor the chain long enough to drop it to 0), compared to effectively free today. 
+- [X] Performance overhead for clients 
+    - It is unclear that Ethereum clients can handle "200% full" blocks for a modest amount of time without their performance being significantly affected. To test this, we are running simulations on testnets with a similar state size to the Ethereum mainnet. 
+    - [Preliminary testing results](https://hackmd.io/@timbeiko/1559-prelim-perf)
+    - [Large State Performance Testing](https://hackmd.io/@timbeiko/1559-perf-test)
+- [X] Transaction Pool Management
+    - Good approaches to transaction pool management have been put forward. [First write up](https://hackmd.io/@adietrichs/1559-transaction-sorting), [Second write up](https://hackmd.io/@adietrichs/1559-transaction-sorting-part2). 
+    - [Alternative approach suggested by @zsfelfoldi](https://gist.github.com/zsfelfoldi/9607ad248707a925b701f49787904fd6)
+- [x] Transaction Encoding/Decoding
+    - EIP-1559 transactions will be encoded using [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718), by adding 1559-style transactions as a new type of transaction. 
+- [X] Legacy transaction management in transaction pool 
+    - Solved by a [recent change to the EIP](https://github.com/ethereum/EIPs/pull/2924) which removes the need for two transaction pools by interpreting legacy transactions as 1559-styles transactions where the `feecap` is set to the `gas price` and the `tip` is set to `feecap - base fee`. 
+- [X] Transition Period 
+    - Solved by a [recent change to the EIP](https://github.com/ethereum/EIPs/pull/2924) which removes the need for a transition period by interpreting legacy transactions as 1559-styles transactions. This means legacy transactions will be supported until an explicit change to the protocol is made to deprecate them. 
+- [X] `BASE FEE` Opcode - [EIP-3198](https://github.com/ethereum/EIPs/pull/3198)
+    - A `BASE FEE` opcode will allow smart contracts to retrieve it directly.
 
-## Specification
+### Testing 
 
-### Meta Specs
+#### Reference Tests 
 
-* [x] [Rayonism](https://github.com/ethereum/rayonism/blob/master/specs/merge.md)
-* [x] [Amphora](https://hackmd.io/@n0ble/merge-interop-spec)
-* [x] [Kintsugi](https://hackmd.io/@n0ble/kintsugi-spec)
-* [x] [Kiln](https://hackmd.io/@n0ble/kiln-spec)
+- [x] Reference / Consensus Tests 
+  - https://github.com/ethereum/tests/tree/develop/BlockchainTests/ValidBlocks/bcEIP1559
+  - https://github.com/ethereum/tests/tree/develop/BlockchainTests/InvalidBlocks/bcEIP1559
+  - https://github.com/ethereum/tests/tree/develop/BlockchainTests/GeneralStateTests/stEIP1559
+  - (Nethereum) https://gist.github.com/juanfranblanco/4cc998247aecd822d6088e382d94a6f1
 
-### Consensus layer
+#### JSON RPC Support 
 
-* [x] Specs feature complete
-* [x] Transition process specified [#2462](https://github.com/ethereum/consensus-specs/pull/2462)
-* [x] Ensure structural conformance with existing specs [#2472](https://github.com/ethereum/consensus-specs/pull/2472) 
-* [x] Rebase with Altair [#2530](https://github.com/ethereum/eth2.0-specs/pull/2530)
-* [x] Rebase with London (update `ExecutionPayload`) [#2533](https://github.com/ethereum/consensus-specs/pull/2533)
-* [ ] Consider weak subjectivity period implications
-  * [ ] Generate accurate weak subjectivity period calculations
-  * [ ] Specify standard data format & methods for weak subjectivity checkpoint distribution
-* [x] P2P spec (primarily just version bumping topics for new types) [#2531](https://github.com/ethereum/consensus-specs/pull/2531)
-* [x] [Optimistic sync spec](https://github.com/ethereum/consensus-specs/blob/dev/sync/optimistic.md) 
-* [ ] Upgrade [`beacon-APIs`](https://github.com/ethereum/beacon-apis) to handle new types
-* [x] [BONUS] Annotated specs [link](https://github.com/ethereum/annotated-spec/tree/master/merge)
+- [x] EIPs that return block or transaction data need to be updated to support EIP-1559/2718 style transactions. Updates are being made to the JSON RPC specification [here](https://github.com/ethereum/eth1.0-specs/pull/47). 
 
-### Execution layer
+#### Community testing
 
-* [x] High level [design doc](https://hackmd.io/@n0ble/ethereum_consensus_upgrade_mainnet_perspective)
-* [x] EIPs
-    * [x] EVM `DIFFICULTY` -> `RANDOM` [EIP-4399](https://eips.ethereum.org/EIPS/eip-4399)
-    * [x] EVM `BLOCKHASH` [unchanged but weaker randomness documented in PoW -> PoS transition EIP] [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675)
-    * [x] Transition process [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675)
-* [x] Network -- devp2p
-    * [x] Block gossip deprecation [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675)
-    * [x] State sync post-merge
-    * [x] Block sync post-merge
-    * [x] Discovery
-* [ ] Upgrade JSON-RPC ([`execution-apis`](https://github.com/ethereum/execution-apis)) with new methods and deprecations
-* [ ] [BONUS] Executable [`execution-specs`](https://github.com/ethereum/execution-specs/pull/219) and testing through the Merge
+- [x] JSON-RPC or equivalent commands that applications and tooling can use to interact with EIP-1559 
+    - [x] [EIP-1559 Toolbox](http://eip1559-tx.ops.pegasys.tech/)
+- [x] Public testnet that applications and tooling can use to test EIP-1559. 
+    - [x] See the [Baikal devnet](https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/baikal.md) 
 
-### Engine API
+### Testnets 
 
-* [x] Basic JSON-RPC extension, [link](https://github.com/ethereum/rayonism/blob/master/specs/merge.md#consensus-json-rpc) (used in rayonism)
-* [x] Production refinements [Engine API](https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md). Previous docs: [WIP doc](https://hackmd.io/@n0ble/consensus_api_design_space), [Interop Edition](https://github.com/ethereum/execution-apis/blob/main/src/engine/interop/specification.md)
-    * Support execution-layer state sync
-    * Support async block insert
-    * Consider support for `Consensus <-> Execution` consistency (e.g. recover from crash or bad insert on execution layer)
-    * Consider bi-directional communication
-    * ...
-* [x] Discuss JSON-RPC vs websockets vs restful http
-* [x] Migrate to [execution-APIs](https://github.com/ethereum/execution-APIs) or other permanent home, [link](https://github.com/ethereum/execution-apis/tree/main/src/engine)
-* [ ] Remove unauthenticated port from specification
-* [ ] [BONUS] Test vectors
+- [x] Tooling to generate usage spikes on testnets;
+    - [WIP by the Besu team](https://github.com/PegaSysEng/eip1559-tx-sender/) 
+- [x] Multi-client PoA testnet to ensure spec can be implemented;
+    - WIP between Geth, Besu & Nethermind teams. 
+- [X] Single-client PoW testnet to ensure the spec works with PoW
+    - Done by Besu team.
+- [X] Multi-client PoW testnet to ensure all code paths are tested; 
+    - The Rhoades testnet is a multi-client PoW testnet ([link](https://hackmd.io/@timbeiko/1559-perf-test))
+- [X] Large state testnet to analyze performance with ~100M accounts on chain. 
+    - The Rhoades testnet has 100m accounts and contract storage slots ([link](https://hackmd.io/@timbeiko/1559-perf-test))
 
-### Public facing documents
+### Other Testing
 
-* [x] Merge architecture design document
-    * [Historical changes](https://tim.mirror.xyz/CHQtTJb1NDxCK41JpULL-zAJe7YOtw-m4UDw6KDju6c), [Architecture](https://tim.mirror.xyz/sR23jU02we6zXRgsF_oTUkttL83S3vyn05vJWnnp-Lc)
-* [ ] Infrastructure provider guide
-* [x] Application Layer Impacts 
-    * [Blog post](https://blog.ethereum.org/2021/11/29/how-the-merge-impacts-app-layer/) 
-* [x] Rename eth1/eth2 to execution/consensus across repos and documentation -- [The Great Renaming](https://notes.ethereum.org/@timbeiko/great-renaming)
+- [x] Nethermind is using EIP-1559 as part of a client's network
+- [x] [Filecoin](https://filecoin.io/blog/roadmap-update-august-2020/), [Celo](https://docs.celo.org/celo-codebase/protocol/transactions/gas-pricing) and [NEAR](https://insights.deribit.com/market-research/transaction-fee-economics-in-near/) have implementations of EIP-1559 in their networks 
 
-## Testing
+## R&D 
 
-### Unit tests
+### Theoretical Analysis 
 
-* [ ] Consensus
-    * [x] Inherit all prior unit tests and generators
-    * [x] Merge specific tests with mocked execution-layer
-    * [ ] [IN [PROGRESS](https://github.com/ethereum/consensus-specs/tree/dev/tests/core/pyspec/eth2spec/test/bellatrix/fork_choice)] Fork and fork-choice tests across merge boundary
-    * [ ] Weak subjectivity checkpoint sync readiness
-* [ ] Execution
-    * [ ] [IN [PROGRESS](https://github.com/ethereum/retesteth/pull/160)] Reuse existing framework for most prior EVM unit tests
-    * [ ] [IN [PROGRESS](https://github.com/ethereum/tests/pull/1008)] New `DIFFICULTY` opcode tests
+- [x] Analysis of whether EIP-1559 is game-theoretically sound, and potential improvements
+    - ["Transaction Fee Mechanism Design for the Ethereum Blockchain:
+An Economic Analysis of EIP-1559" by Tim Roughgarden](http://timroughgarden.org/papers/eip1559.pdf)
+    - [EIP-1559 slides by Vitalik Buterin](https://vitalik.ca/files/misc_files/EIP_1559_Fee_Structure.pdf) 
+    - [Blockchain Resource Pricing by Vitalik Buterin](https://github.com/ethereum/research/blob/master/papers/pricing/ethpricing.pdf) 
+- [x] Comparison of EIP-1559 with alternatives (e.g. [Escalator Fees](https://eips.ethereum.org/EIPS/eip-2593))
+    - ["Transaction Fee Mechanism Design for the Ethereum Blockchain:
+An Economic Analysis of EIP-1559" by Tim Roughgarden](http://timroughgarden.org/papers/eip1559.pdf)
+    - [Analysis by Deribit](https://insights.deribit.com/market-research/analysis-of-eip-2593-escalator/)
+    - ["Floating escalator" simulation](https://github.com/barnabemonnot/abm1559/blob/master/notebooks/floatingEscalator.ipynb) to model using the [escalator fees](https://eips.ethereum.org/EIPS/eip-2593) approach to the EIP-1559 tip parameter.
 
-### Integration tests
+### Simulations
 
-* [x] Testnet [chaos messages](https://github.com/MariusVanDerWijden/go-ethereum/tree/merge-bad-block-creator)
-* [ ] Hive
-    * [ ] [IN [PROGRESS](https://github.com/ethereum/hive/pull/496)] Mocked CL for EL engine API unit testing
-    * [ ] [IN [PROGRESS](https://github.com/ethereum/hive/pull/495)] CL+EL integration ests with all client combos
-* [ ] Shadow fork Goerli on a daily or weekly basis to continuously test live transition and TX replays 
-* [x] [BONUS] Additional simulation testing -- e.g. kurtosis, antithesis, etc
-    * [x] [Kurtosis Merge Module](https://github.com/kurtosis-tech/eth2-merge-kurtosis-module)
+- [X] [Agent-Based Simulations of EIP-1559](https://github.com/barnabemonnot/abm1559#abm1559)
+- [X] [Legacy vs EIP 1559 users in post EIP 1559 world](https://github.com/NethermindEth/research/blob/main/legacyTransactions.ipynb)
+- [X] [Manipulation of the basefee in the context of EIP-1559](https://medium.com/nethermind-eth/the-manipulation-of-the-basefee-in-the-context-of-eip-1559-4b082898271c)
 
-### Stress tests
+## Community Outreach
 
-* [ ] Single client load/metrics
-* [ ] Network load testing 
-  * [ ] Larger blocks
-  * [ ] Shorter slot times
-  * [ ] Large execution state (shadow-forking mainnet)
-
-### Fuzzing
-
-* [x] [Fuzz engine API](https://github.com/MariusVanDerWijden/merge-fuzz)
-* [ ] Beacon-fuzz applied to merge ready consensus clients
-* [ ] Existing EVM fuzzing infra applied to merge ready execution engines
-
-## Testnets
-
-* [X] Short-lived devnets without transition process
-* [X] Short-lived devnets *with* transition process
-* [x] Long-lived devnets [link](https://blog.ethereum.org/2021/12/20/kintsugi-merge-testnet/)
-* [ ] Fork public testnets
-
-## R&D
-
-Most research related to the merge has been completed. This section lists topics which are either tangentially related, or nice-to-haves, and still require R&D work.
-
-* [x] Transition process analysis
-    * [x] Evaluate precision of TD computation on historic data
-        * https://ethresear.ch/t/using-total-difficulty-threshold-for-hardfork-anchor-what-could-go-wrong/10357
-* [x] Execution-layer sync
-    * [x] Historic block sync (reverse header then forward body)
-    * [x] Historic state sync (optimistic beacon block transition provides head data for EL sync)
-    * [x] Sync during transition period (forward sync to PoW TTD, reverse sync past TTD)
-* [x] Discovery [is there actually anything to do here?]
-* [x] [In research, not to be included merge] Execution-layer proof of custody
-* [ ] Disaster recovery if invalid chain finalized
-  * [x] EL will perform re-orgs beyond finality but at a potential high sync cost
-  * [x] [WIP] Client multiplexers ([link](https://github.com/karalabe/minority), note: doesn't help with DR, but can potentially prevent invalid chains being finalized)
-* [ ] Further threat analysis
-    * [ ] Miner attacks
-    * [ ] Resource exhaustion post-merge
-* [x] Fee Market behavior changes (missed slots impact)
-    * [EIP-4396](https://eips.ethereum.org/EIPS/eip-4396) proposed 
+- [X] Community outreach to projects to gather feedback on EIP-1559 
+    - [Initial report published by the Ethereum Cat Herders](https://medium.com/ethereum-cat-herders/eip-1559-community-outreach-report-aa18be0666b5). Feedback still can be shared [here](https://forms.gle/bsdgBtG8g7KYnQL48). More wallet and exchange feedback is still needed. An update to the report may be published once more feedback has been gathered.  
+    - [Second outreach round, where projects can now signal their support](https://github.com/ethereum-cat-herders/1559-outreach)
+- [X] Outreach to miners to better understand their objections to 1559, and stance if it is to be deployed on mainnet. 
+    - A discord channel has been created for miners to voice their concerns about EIP-1559
+    - A community call has been organized for miners and other stakeholders to discuss EIP-1559's impact 
